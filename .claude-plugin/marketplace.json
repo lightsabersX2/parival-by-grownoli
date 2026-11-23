@@ -7,7 +7,8 @@
     {
       "name": "parival-by-grownoli",
       "source": "./",
-      "description": "Beta. Whole runs of finished ads from a brand's own pictures, a local page to review them, and an export to Grownoli Studio."
+      "description": "Parival makes finished ads from your own website's pictures. A campaign comes as several ads in five formats, each revised after blind critique, on a page on your computer where you rate and comment. Exports to Grownoli Studio. Beta.",
+      "displayName": "Parival by Grownoli"
     }
   ],
   "metadata": {
