@@ -1,7 +1,7 @@
 {
   "name": "parival-by-grownoli",
-  "version": "0.3.2",
-  "description": "Whole runs of finished ads from a brand's own pictures: several ads in five formats, each through blind critique and revision, shown on a local page for rating and comments, with an export to Grownoli Studio.",
+  "version": "0.4.0",
+  "description": "Beta. Whole runs of finished ads from a brand's own pictures: several ads in five formats, each through blind critique and revision, shown on a local page for rating and comments, with an export to Grownoli Studio.",
   "author": {
     "name": "Adam Lithner",
     "email": "hello@grownoli.com",

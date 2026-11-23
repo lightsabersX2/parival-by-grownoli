@@ -35,10 +35,10 @@ for (const [name, opts] of [['light', {}], ['dark', { dark: true }], ['phone', {
       assert.match(settings, /hello@grownoli\.com/)
       assert.match(settings, /Copyright 2026 Adam Lithner/)
       const about = await b.evaluate(`[...document.querySelectorAll('[aria-labelledby=settings-title] h3')].find((h) => h.textContent.trim() === 'About').parentElement.innerText`)
-      for (const line of [/version \d+\.\d+\.\d+/, /Copyright 2026 Adam Lithner/, /Open source under the Apache License 2\.0/, /Parival sends Grownoli the statistics below while they are on, and asks Grownoli which version is the latest\. Parival sends nothing else\./]) assert.match(about, line)
+      for (const line of [/version \d+\.\d+\.\d+, beta/, /Copyright 2026 Adam Lithner/, /Open source under the Apache License 2\.0/, /Parival asks Grownoli which version is the latest, and sends Grownoli the statistics below only if you choose to share them\. Parival sends nothing else\./]) assert.match(about, line)
       assert.doesNotMatch(settings, /anonym|sends nothing anywhere/i)
       assert.match(settings, /Share statistics/)
-      assert.match(settings, /such as runs, ads, formats and errors, with a random ID made on this computer\. The ID is not linked to your name, your email or your Claude account\. Turning statistics off deletes the ID and sets the counts on this computer back to zero\./)
+      assert.match(settings, /When this is on, Parival sends Grownoli counts of what the plugin does, such as runs, ads, formats and errors, with a random ID made on this computer\. The ID is not linked to your name, your email or your Claude account\. Turning statistics off deletes the ID and sets the counts on this computer back to zero\./)
       assert.match(settings, /To have Grownoli delete your records sooner, send the ID from Statistics Report to hello@grownoli\.com before you turn statistics off\./)
       assert.match(settings, /Parival is free\. A contribution helps its development and unlocks nothing\./)
       assert.equal(await b.evaluate(`[...document.querySelectorAll('[aria-labelledby=settings-title] a')].find((a) => a.textContent.trim() === 'Contribute').href`), 'https://buymeacoffee.com/lightsabersx2')
@@ -84,25 +84,39 @@ function freshPage(port, { loops = 3, count = 3, answered = false } = {}) {
   return { address: started.address, settings, stop: () => execFileSync(process.execPath, [PAGE, 'stop', runs], { env }) }
 }
 
-test('the first visit shows the notice once, and Turn Off Statistics leaves no ID', async () => {
+test('the first visit asks once whether to share, with two equal answers, and Don\u2019t Share leaves no ID', async () => {
   const p = freshPage(5411)
   const b = await browser(p.address)
   try {
     await b.until(`!!document.querySelector('[role=alertdialog]')`)
     const notice = await b.evaluate(`document.querySelector('[role=alertdialog]').innerText`)
-    assert.match(notice, /Parival sends Grownoli counts/)
+    assert.match(notice, /^Share statistics with Grownoli\?/)
+    assert.match(notice, /If you share, Parival sends Grownoli counts/)
     assert.match(notice, /The counts carry a random ID made on this computer\. The ID is not linked to your name, your email or your Claude account\./)
     assert.match(notice, /Parival never sends websites, brand names, ad copy, pictures, file names or comments\./)
     assert.doesNotMatch(notice, /anonym/i)
-    assert.deepEqual(await b.evaluate(`[...document.querySelectorAll('[role=alertdialog] button')].map((x) => x.textContent.trim())`), ['Turn Off Statistics', 'OK'])
-    assert.equal('noticeShown' in p.settings(), false, 'showing the notice is not an answer')
+    assert.deepEqual(await b.evaluate(`[...document.querySelectorAll('[role=alertdialog] button')].map((x) => x.textContent.trim())`), ['Don\u2019t Share', 'Share Statistics'])
+    // equal weight: the same style and size, and neither holds the focus when the question opens
+    const looks = await b.evaluate(`[...document.querySelectorAll('[role=alertdialog] button')].map((x) => { const c = getComputedStyle(x), r = x.getBoundingClientRect(); return [x.className, c.backgroundColor, c.color, c.fontWeight, Math.round(r.width), Math.round(r.height)].join('|') })`)
+    assert.equal(looks[0], looks[1])
+    assert.equal(await b.evaluate(`!!document.activeElement?.closest('[role=alertdialog]')`), false)
+    assert.equal('installId' in p.settings(), false, 'no ID exists while the question is open')
+    assert.equal('noticeShown' in p.settings(), false, 'showing the question is not an answer')
     await shot(b, 'light-notice')
-    assert.ok(await b.evaluate(click(byLabel('Turn Off Statistics'))))
+    assert.ok(await b.evaluate(click(byLabel('Don\u2019t Share'))))
     await b.until(`!document.querySelector('[role=alertdialog]')`)
     for (const t = Date.now(); !p.settings().noticeShown && Date.now() - t < 3000;) await new Promise((r) => setTimeout(r, 50))
     assert.deepEqual([p.settings().statistics, 'installId' in p.settings()], [false, false])
     const again = await browser(p.address)
-    try { await again.until(`document.querySelectorAll('figure img').length > 0`); assert.equal(await again.evaluate(`!!document.querySelector('[role=alertdialog]')`), false, 'the notice shows once') } finally { again.close() }
+    try { await again.until(`document.querySelectorAll('figure img').length > 0`); assert.equal(await again.evaluate(`!!document.querySelector('[role=alertdialog]')`), false, 'the question is asked once')
+      // the switch in Settings shows the answer, and turning it on is the choice to share
+      await again.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true }))`)
+      await again.until(`!!document.querySelector('[aria-labelledby=settings-title] input[type=checkbox]')`)
+      assert.equal(await again.evaluate(`document.querySelector('[aria-labelledby=settings-title] input[type=checkbox]').checked`), false)
+      await again.evaluate(`document.querySelector('[aria-labelledby=settings-title] input[type=checkbox]').click()`)
+      for (const t = Date.now(); !p.settings().installId && Date.now() - t < 3000;) await new Promise((r) => setTimeout(r, 50))
+      assert.deepEqual([p.settings().statistics, typeof p.settings().installId], [true, 'string'])
+    } finally { again.close() }
   } finally { b.close(); p.stop() }
 })
 

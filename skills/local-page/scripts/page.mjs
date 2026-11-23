@@ -53,7 +53,7 @@ function readCounts() {
 function readSettings() {
 	const s = read("settings.json");
 	return {
-		statistics: s.statistics !== false,
+		statistics: s.statistics === true && typeof s.installId === "string",
 		...typeof s.installId === "string" && { installId: s.installId },
 		...s.noticeShown && { noticeShown: s.noticeShown },
 		...s.lastReport && { lastReport: s.lastReport },
@@ -76,8 +76,7 @@ function saveSettings(change) {
 	return s;
 }
 /** The switch. Off deletes the random ID on this computer and sets the totals back to zero, so that a new ID never
-* arrives carrying the old ID's totals and the two cannot be matched. On again makes a new ID once the notice has been
-* seen. */
+* arrives carrying the old ID's totals and the two cannot be matched. On again makes a new ID. Turning the switch on is itself the choice to share. */
 function setStatistics(on) {
 	if (!on && readSettings().installId) try {
 		write("counts.json", {
@@ -98,10 +97,13 @@ function setStatistics(on) {
 		if (!on) {
 			delete s.installId;
 			delete s.refused;
-		} else if (s.noticeShown && !s.installId) s.installId = randomUUID();
+		} else {
+			s.noticeShown ??= (/* @__PURE__ */ new Date()).toISOString();
+			s.installId ??= randomUUID();
+		}
 	});
 }
-/** The person answered the first-open notice, with statistics left on or turned off. */
+/** The person answered the first-open question: share, or do not share. */
 function answerNotice(statistics, now = /* @__PURE__ */ new Date()) {
 	return saveSettings((s) => {
 		s.noticeShown ??= now.toISOString();
@@ -130,7 +132,7 @@ function osName() {
 	else if (platform() === "linux") name = `Linux ${release()}`;
 	return os = name.replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 40) || "unknown";
 }
-/** The next report, or null when none will be sent: statistics are off, or the notice has not been answered. */
+/** The next report, or null when none will be sent: the person has not chosen to share. */
 function report(version) {
 	const s = readSettings();
 	if (!s.statistics || !s.noticeShown || !s.installId) return null;
@@ -574,7 +576,7 @@ async function body(req) {
 	}
 	return JSON.parse(raw || "{}");
 }
-/** Sends the report when one is due: statistics on, the notice answered, and a day since the last one that arrived.
+/** Sends the report when one is due: the person has chosen to share, and a day has passed since the last one arrived.
 * A failure is silent and changes nothing, so the page works the same offline. A report Grownoli refuses as malformed
 * is not sent again until its bytes change. */
 async function sendReport() {
@@ -638,7 +640,7 @@ function serve(runs, first) {
 		}
 		if (path === "/notice" && post) {
 			const { statistics } = await body(req);
-			const s = answerNotice(statistics !== false);
+			const s = answerNotice(statistics === true);
 			sendReport();
 			return send(res, 200, { statistics: s.statistics });
 		}
@@ -649,12 +651,12 @@ function serve(runs, first) {
 			return send(res, 200, { statistics: s.statistics });
 		}
 		if (path === "/report") {
-			const s = readSettings(), r = report(VERSION);
+			const r = report(VERSION);
 			res.writeHead(200, {
 				"Content-Type": "text/plain; charset=utf-8",
 				"Cache-Control": "no-store"
 			});
-			res.end(r ? reportBytes(r) + "\n" : s.statistics ? "Parival sends no report until you have answered the notice about statistics.\n" : "Statistics are off. Parival sends no report.\n");
+			res.end(r ? reportBytes(r) + "\n" : "Statistics are off. Parival sends no report.\n");
 			return;
 		}
 		if (path === "/opened" && post) {

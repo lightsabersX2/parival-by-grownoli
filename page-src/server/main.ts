@@ -2,7 +2,7 @@
 // else. It listens on 127.0.0.1 only, answers only requests addressed to this machine's own page, serves the runs
 // folder read-only, and writes one kind of file there: feedback.json in a set's folder. It makes two kinds of request
 // of its own, both to the address in counts.ts: the statistics report, at most once a day and only after the person
-// has answered the notice with statistics left on, and the version check.
+// has chosen to share statistics, and the version check.
 //   node page.mjs start <runs folder> [--port 5290] [--no-open]   starts the page if it is not running, opens it, prints its address
 //   node page.mjs stop <runs folder>                              stops it
 //   node page.mjs comments <runs folder> [--all]                  prints every rating, note and pinned comment the person left
@@ -53,7 +53,7 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   return JSON.parse(raw || '{}')
 }
 
-/** Sends the report when one is due: statistics on, the notice answered, and a day since the last one that arrived.
+/** Sends the report when one is due: the person has chosen to share, and a day has passed since the last one arrived.
  * A failure is silent and changes nothing, so the page works the same offline. A report Grownoli refuses as malformed
  * is not sent again until its bytes change. */
 async function sendReport() {
@@ -100,7 +100,7 @@ function serve(runs: string, first: number) {
     }
     if (path === '/notice' && post) {
       const { statistics } = await body(req)
-      const s = answerNotice(statistics !== false)
+      const s = answerNotice(statistics === true)
       void sendReport()
       return send(res, 200, { statistics: s.statistics })
     }
@@ -112,9 +112,9 @@ function serve(runs: string, first: number) {
     }
     if (path === '/report') {
       // the exact bytes of the next report, or a sentence saying why none is sent
-      const s = readSettings(), r = report(VERSION)
+      const r = report(VERSION)
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
-      return void res.end(r ? reportBytes(r) + '\n' : s.statistics ? 'Parival sends no report until you have answered the notice about statistics.\n' : 'Statistics are off. Parival sends no report.\n')
+      return void res.end(r ? reportBytes(r) + '\n' : 'Statistics are off. Parival sends no report.\n')
     }
     if (path === '/opened' && post) {
       // A finished run the person has just opened for the first time is the one moment the donation ask may show.

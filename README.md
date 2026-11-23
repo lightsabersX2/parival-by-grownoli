@@ -1,5 +1,8 @@
 # Parival by Grownoli
 
+> [!NOTE]
+> Parival is in beta. It works, and parts of it will change. Faults and questions go to hello@grownoli.com.
+
 Parival is a plugin for Claude Code. It makes whole campaigns of finished ads from a brand's own pictures and shows them on a page on your own computer, where you rate them and comment.
 
 ## What it does
@@ -66,20 +69,16 @@ Runs are saved in `~/Documents/Ads/runs` unless you name another folder. Each ru
 
 The local page runs on your computer only, at an address that starts with `127.0.0.1`, and other computers cannot reach it. Your ads, ratings and comments stay on your computer.
 
-Parival sends Grownoli two things:
+The first time the page opens, it asks whether you want to share statistics with Grownoli. Nothing is sent, and no ID is made, unless you choose to share. You can change your answer in Settings with ‘Share statistics’.
 
-- **Statistics**, while they are on. They are counts: runs, ads and formats made, how the blind comparisons ended, project files made for Grownoli Studio, how long a run takes, errors by kind, and the versions of Parival, Node and your operating system. The counts carry a random ID made on your computer. The ID is not linked to your name, your email or your Claude account. Parival never sends websites, brand names, ad copy, pictures, file names or comments.
-- **A version check**, so that the page can say when a newer version exists. The check carries the plugin's version and nothing else.
+- **Statistics**, if you share them, are counts: runs, ads and formats made, how the blind comparisons ended, project files made for Grownoli Studio, how long a run takes, errors by kind, and the versions of Parival, Node and your operating system. The counts carry a random ID made on your computer. The ID is not linked to your name, your email or your Claude account. Parival never sends websites, brand names, ad copy, pictures, file names or comments. Statistics Report in Settings shows the exact data of the next report, with the ID.
+- **A version check** runs whatever you answer, so that the page can say when a newer version exists. The check carries the plugin's version and nothing else. No setting turns the check off, and the page may make the check before you have answered the question.
 
-The page shows a notice about statistics the first time it opens, and sends no statistics before you have answered it. Turn statistics off there, or later in Settings. Turning them off deletes the ID and sets the counts on your computer back to zero, so turning them on again starts a new ID from nothing. Statistics Report in Settings shows the exact data of the next report, with the ID.
-
-No setting turns the version check off, and the page may make that check before you have seen the notice.
-
-Grownoli stores no IP address with a report or a version check, and deletes an install's ID 25 months after its last report. To have your records deleted sooner, send the ID to hello@grownoli.com before you turn statistics off.
+Turning statistics off deletes the ID and sets the counts on your computer back to zero, so turning them on again starts a new ID from nothing. Grownoli stores no IP address with a report or a version check, and deletes an install's ID 25 months after its last report. To have your records deleted sooner, send the ID to hello@grownoli.com before you turn statistics off.
 
 Parival keeps the counts and the switch in `~/.config/parival-by-grownoli`.
 
-Making ads uses Claude Code, which works as your Claude plan describes, and reads the website you name.
+Making ads uses Claude Code, which works as your Claude plan describes, and reads the website you name. If you set your own Unsplash key, photo searches go to Unsplash.
 
 ## Contributing money
 

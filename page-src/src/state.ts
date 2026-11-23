@@ -85,13 +85,13 @@ const post = (path: string, body: unknown) => fetch(path, { method: 'POST', head
 export async function loadApp() {
   try { const r = await fetch('/api/state'); if (r.ok) app.value = await r.json() } catch { /* About shows less */ }
 }
-/** The first-open notice was answered, with statistics left on or turned off. */
+/** The first-open question was answered: share, or do not share. */
 export async function answerNotice(statistics: boolean) {
   if (app.value) app.value = { ...app.value, statistics, noticeShown: true }
   await post('/api/notice', { statistics }).catch(() => {})
 }
 export async function setStatistics(on: boolean) {
-  if (app.value) app.value = { ...app.value, statistics: on }
+  if (app.value) app.value = { ...app.value, statistics: on, noticeShown: app.value.noticeShown || on }
   await post('/api/statistics', { on }).catch(() => {})
 }
 /** The donation ask is due and waits for a quiet moment: no panel, no enlarged ad, no comment being written. */

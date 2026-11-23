@@ -31,11 +31,11 @@ const VERSION = __VERSION__
         <div class="flex items-baseline gap-4 md:col-span-2">
           <h3 class="label w-28 shrink-0">About</h3>
           <div class="space-y-1 text-[13px] text-ink-2">
-            <p><span class="font-medium text-ink">Parival by Grownoli</span>, version {{ app?.version ?? VERSION }}</p>
+            <p><span class="font-medium text-ink">Parival by Grownoli</span>, version {{ app?.version ?? VERSION }}, beta</p>
             <p v-if="app?.latest" class="font-medium text-ink" role="status">Version {{ app.latest }} is available. Update the plugin in Claude Code.</p>
             <p>Copyright 2026 Adam Lithner</p>
             <p>Open source under the Apache License 2.0</p>
-            <p>This page runs on this computer. Parival sends Grownoli the statistics below while they are on, and asks Grownoli which version is the latest. Parival sends nothing else.</p>
+            <p>This page runs on this computer. Parival asks Grownoli which version is the latest, and sends Grownoli the statistics below only if you choose to share them. Parival sends nothing else.</p>
             <p class="flex flex-wrap gap-x-4 pt-1">
               <a href="/about/licence.txt" target="_blank" rel="noopener" class="font-medium text-ink underline underline-offset-2">Licence</a>
               <a href="/about/third-party-notices.txt" target="_blank" rel="noopener" class="font-medium text-ink underline underline-offset-2">Third-party notices</a>
@@ -46,7 +46,7 @@ const VERSION = __VERSION__
           <h3 class="label w-28 shrink-0">Statistics</h3>
           <div class="space-y-1.5 text-[13px] text-ink-2">
             <label class="flex items-center gap-2 font-medium text-ink"><input type="checkbox" class="h-4 w-4 accent-[var(--ink)]" :checked="app.statistics" @change="setStatistics(($event.target as HTMLInputElement).checked)" />Share statistics</label>
-            <p>Parival sends Grownoli counts of what the plugin does, such as runs, ads, formats and errors, with a random ID made on this computer. The ID is not linked to your name, your email or your Claude account. Turning statistics off deletes the ID and sets the counts on this computer back to zero.</p>
+            <p>When this is on, Parival sends Grownoli counts of what the plugin does, such as runs, ads, formats and errors, with a random ID made on this computer. The ID is not linked to your name, your email or your Claude account. Turning statistics off deletes the ID and sets the counts on this computer back to zero.</p>
             <p>To have Grownoli delete your records sooner, send the ID from Statistics Report to <a href="mailto:hello@grownoli.com" class="underline underline-offset-2">hello@grownoli.com</a> before you turn statistics off.</p>
             <p><a href="/api/report" target="_blank" rel="noopener" class="font-medium text-ink underline underline-offset-2">Statistics Report</a></p>
           </div>

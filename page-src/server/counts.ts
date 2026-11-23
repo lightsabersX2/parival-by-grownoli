@@ -27,11 +27,11 @@ export interface Counts {
   errors: Partial<Record<ErrorCode, number>>
 }
 export interface Settings {
-  /** on unless the person turned it off */
+  /** off until the person chooses to share, in the first-open question or with the switch */
   statistics: boolean
-  /** made when the person has seen the notice and statistics are on; deleted when they are turned off */
+  /** made when the person chooses to share; deleted when statistics are turned off */
   installId?: string
-  /** when the person answered the first-open notice; nothing is sent before */
+  /** when the person answered the first-open question, or first used the switch */
   noticeShown?: string
   lastReport?: string
   /** a short hash of the last report Grownoli refused as malformed, so the same bytes are not sent again */
@@ -77,7 +77,7 @@ export function count(add: Add) {
 export function readSettings(): Settings {
   const s = read<Settings>('settings.json')
   return {
-    statistics: s.statistics !== false,
+    statistics: s.statistics === true && typeof s.installId === 'string',
     ...(typeof s.installId === 'string' && { installId: s.installId }), ...(s.noticeShown && { noticeShown: s.noticeShown }),
     ...(s.lastReport && { lastReport: s.lastReport }), ...(typeof s.refused === 'string' && { refused: s.refused }), ...(s.latestVersion && { latestVersion: s.latestVersion }),
     support: { asks: whole(s.support?.asks), lastAt: whole(s.support?.lastAt), supported: s.support?.supported === true },
@@ -91,17 +91,16 @@ export function saveSettings(change: (s: Settings) => void): Settings {
   return s
 }
 /** The switch. Off deletes the random ID on this computer and sets the totals back to zero, so that a new ID never
- * arrives carrying the old ID's totals and the two cannot be matched. On again makes a new ID once the notice has been
- * seen. */
+ * arrives carrying the old ID's totals and the two cannot be matched. On again makes a new ID. Turning the switch on is itself the choice to share. */
 export function setStatistics(on: boolean): Settings {
   if (!on && readSettings().installId) try { write('counts.json', { ...readCounts(), runs: 0, ads: 0, formats: 0, loopsKept: 0, loopsLost: 0, loopsEqual: 0, studioExports: 0, runMinutes: [], errors: {} }) } catch { /* the ID still goes */ }
   return saveSettings((s) => {
     s.statistics = on
     if (!on) { delete s.installId; delete s.refused }
-    else if (s.noticeShown && !s.installId) s.installId = randomUUID()
+    else { s.noticeShown ??= new Date().toISOString(); s.installId ??= randomUUID() }
   })
 }
-/** The person answered the first-open notice, with statistics left on or turned off. */
+/** The person answered the first-open question: share, or do not share. */
 export function answerNotice(statistics: boolean, now = new Date()): Settings {
   return saveSettings((s) => {
     s.noticeShown ??= now.toISOString()
@@ -128,7 +127,7 @@ export function osName() {
   return (os = name.replace(/[^A-Za-z0-9 ._-]/g, '').slice(0, 40) || 'unknown')
 }
 
-/** The next report, or null when none will be sent: statistics are off, or the notice has not been answered. */
+/** The next report, or null when none will be sent: the person has not chosen to share. */
 export function report(version: string): Report | null {
   const s = readSettings()
   if (!s.statistics || !s.noticeShown || !s.installId) return null

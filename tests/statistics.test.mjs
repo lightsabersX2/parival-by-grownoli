@@ -55,9 +55,10 @@ test('the version check carries the version and nothing else, before any notice'
   assert.equal((await (await fetch(address + 'api/state')).json()).latest, '9.9.9', 'About can say that a newer version exists')
 })
 
-test('nothing is reported before the notice is answered', async () => {
+test('nothing is reported and no ID exists before the person chooses to share', async () => {
   assert.deepEqual(reports(), [])
-  assert.match(await (await fetch(address + 'api/report')).text(), /no report until you have answered the notice/)
+  assert.equal((await (await fetch(address + 'api/state')).json()).statistics, false, 'the switch is off until a yes')
+  assert.match(await (await fetch(address + 'api/report')).text(), /Statistics are off\. Parival sends no report\./)
   assert.equal(fs.existsSync(path.join(HOME, 'settings.json')) && 'installId' in settings(), false, 'no ID exists yet')
 })
 
@@ -138,13 +139,32 @@ test('a refused report is not sent again unchanged, and "skipped" counts as sent
   answer = 200
 })
 
-test('"Turn Off Statistics" on the notice leaves no ID and sends nothing', async () => {
+test('a no leaves the switch off, makes no ID and sends nothing, ever', async () => {
   fs.rmSync(path.join(HOME, 'settings.json'))
   const before = reports().length
   await post('api/notice', { statistics: false })
   await settle()
   assert.deepEqual([settings().statistics, 'installId' in settings(), !!settings().noticeShown], [false, false, true])
+  assert.equal((await (await fetch(address + 'api/state')).json()).statistics, false)
+  // work goes on, the page is restarted, days pass: still nothing
+  run('status', set)
+  page('stop', runs)
+  page('start', runs, '--no-open', '--port', '5397')
+  await settle()
   assert.equal(reports().length, before)
+  assert.equal('installId' in settings(), false)
+  assert.match(await (await fetch(address + 'api/report')).text(), /Statistics are off/)
+})
+
+test('with no answer at all, a restart still sends no report and makes no ID', async () => {
+  fs.rmSync(path.join(HOME, 'settings.json'))
+  const before = reports().length
+  page('stop', runs)
+  page('start', runs, '--no-open', '--port', '5397')
+  await settle()
+  assert.equal(reports().length, before)
+  assert.equal(fs.existsSync(path.join(HOME, 'settings.json')) && 'installId' in settings(), false)
+  await post('api/notice', { statistics: false })
 })
 
 test('the donation ask: only on a finished run opened for the first time, at three runs, then 7 days, 45 after Already Supported', async () => {
@@ -189,4 +209,25 @@ test('with nobody listening, the page and the scripts work the same', async () =
     assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'counts.json'), 'utf8')).runs, 1)
     assert.equal('lastReport' in JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8')), false, 'a report that did not arrive is not marked as sent')
   } finally { execFileSync(process.execPath, [path.join(PLUGIN, 'skills', 'local-page', 'scripts', 'page.mjs'), 'stop', other.runs], { env }) }
+})
+
+test('what the person is told names every field the report holds', async () => {
+  await post('api/statistics', { on: true })
+  const fields = Object.keys(JSON.parse(await (await fetch(address + 'api/report')).text()))
+  // each field of the report, and the words that disclose it in the first-open question and in the README
+  const told = {
+    installId: [/random ID made on this computer/, /random ID made on your computer/],
+    pluginVersion: [/versions of Parival, Node and your operating system/, /versions of Parival, Node and your operating system/],
+    os: [/your operating system/, /your operating system/], node: [/Node/, /Node/],
+    runs: [/how many runs, ads and formats you make/, /runs, ads and formats made/], ads: [/ads/, /ads/], formats: [/formats/, /formats/],
+    loopsKept: [/how the blind comparisons end/, /how the blind comparisons ended/], loopsLost: [/blind comparisons/, /blind comparisons/], loopsEqual: [/blind comparisons/, /blind comparisons/],
+    studioExports: [/project files you export for Grownoli Studio/, /project files made for Grownoli Studio/],
+    minutesPerRun: [/how long a run takes/, /how long a run takes/], errors: [/which kinds of error occur/, /errors by kind/],
+  }
+  assert.deepEqual(fields.sort(), Object.keys(told).sort(), 'a field was added to the report without a line telling the person')
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..')
+  const question = fs.readFileSync(path.join(root, 'page-src', 'src', 'components', 'FirstNotice.vue'), 'utf8'), readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8')
+  for (const [field, [inQuestion, inReadme]] of Object.entries(told)) { assert.match(question, inQuestion, `${field} in the question`); assert.match(readme, inReadme, `${field} in the README`) }
+  for (const text of [question, readme]) assert.doesNotMatch(text, /anonym/i)
+  await post('api/statistics', { on: false })
 })
