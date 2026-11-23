@@ -1,12 +1,137 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { execFile, spawn } from "node:child_process";
-import { tmpdir } from "node:os";
+import { homedir, platform, release, tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+// server/counts.ts
+/** Where the report and the version check go. The one place these addresses are written. */
+const API = process.env.PARIVAL_API ?? "https://grownoli.com/api/parival";
+/** Where a contribution goes. The one place this address is written. */
+const SUPPORT_URL = "https://buymeacoffee.com/lightsabersx2";
+/** The errors that are counted, by code. An error's own text is never kept. */
+const ERROR_CODES = [
+	"render_failed",
+	"export_failed",
+	"critique_malformed",
+	"verdict_missing"
+];
+const home = () => process.env.PARIVAL_HOME ?? join(homedir(), ".config", "parival-by-grownoli");
+const read = (name) => {
+	try {
+		return JSON.parse(readFileSync(join(home(), name), "utf8"));
+	} catch {
+		return {};
+	}
+};
+function write(name, data) {
+	mkdirSync(home(), { recursive: true });
+	const tmp = join(home(), `${name}.${process.pid}.tmp`);
+	writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+	renameSync(tmp, join(home(), name));
+}
+const whole = (v) => Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+function readCounts() {
+	const c = read("counts.json");
+	const errors = {};
+	for (const code of ERROR_CODES) if (whole(c.errors?.[code])) errors[code] = whole(c.errors?.[code]);
+	return {
+		runs: whole(c.runs),
+		ads: whole(c.ads),
+		formats: whole(c.formats),
+		loopsKept: whole(c.loopsKept),
+		loopsLost: whole(c.loopsLost),
+		loopsEqual: whole(c.loopsEqual),
+		studioExports: whole(c.studioExports),
+		runMinutes: (Array.isArray(c.runMinutes) ? c.runMinutes : []).map(whole).slice(-200),
+		errors
+	};
+}
+function readSettings() {
+	const s = read("settings.json");
+	return {
+		statistics: s.statistics !== false,
+		...typeof s.installId === "string" && { installId: s.installId },
+		...s.noticeShown && { noticeShown: s.noticeShown },
+		...s.lastReport && { lastReport: s.lastReport },
+		...s.latestVersion && { latestVersion: s.latestVersion },
+		support: {
+			asks: whole(s.support?.asks),
+			lastAt: whole(s.support?.lastAt),
+			supported: s.support?.supported === true
+		},
+		openedRuns: Array.isArray(s.openedRuns) ? s.openedRuns.map(String).slice(-500) : []
+	};
+}
+function saveSettings(change) {
+	const s = readSettings();
+	change(s);
+	try {
+		write("settings.json", s);
+	} catch {}
+	return s;
+}
+/** The switch. Off deletes the random ID on this computer; on again makes a new one once the notice has been seen. */
+function setStatistics(on) {
+	return saveSettings((s) => {
+		s.statistics = on;
+		if (!on) delete s.installId;
+		else if (s.noticeShown && !s.installId) s.installId = randomUUID();
+	});
+}
+/** The person answered the first-open notice, with statistics left on or turned off. */
+function answerNotice(statistics, now = /* @__PURE__ */ new Date()) {
+	return saveSettings((s) => {
+		s.noticeShown ??= now.toISOString();
+		s.statistics = statistics;
+		if (!statistics) delete s.installId;
+		else s.installId ??= randomUUID();
+	});
+}
+const median = (xs) => {
+	if (!xs.length) return 0;
+	const s = [...xs].sort((a, b) => a - b);
+	return s.length % 2 ? s[(s.length - 1) / 2] : Math.round((s[s.length / 2 - 1] + s[s.length / 2]) / 2);
+};
+/** The next report, or null when none will be sent: statistics are off, or the notice has not been answered. */
+function report(version) {
+	const s = readSettings();
+	if (!s.statistics || !s.noticeShown || !s.installId) return null;
+	const c = readCounts();
+	return {
+		installId: s.installId,
+		pluginVersion: version,
+		os: `${platform()} ${release()}`,
+		node: Number(process.versions.node.split(".")[0]),
+		runs: c.runs,
+		ads: c.ads,
+		formats: c.formats,
+		loopsKept: c.loopsKept,
+		loopsLost: c.loopsLost,
+		loopsEqual: c.loopsEqual,
+		studioExports: c.studioExports,
+		minutesPerRun: median(c.runMinutes),
+		errors: c.errors
+	};
+}
+/** The exact bytes of a report, as they are sent and as Statistics Report shows them. */
+const reportBytes = (r) => JSON.stringify(r, null, 2);
+const DAY$1 = 864e5;
+/** Whether the donation ask is due, with this many finished runs. */
+function supportDue(state, finishedRuns, now) {
+	if (state.supported) return now - state.lastAt >= 45 * DAY$1;
+	if (state.asks === 0) return finishedRuns >= 3;
+	return now - state.lastAt >= 7 * DAY$1;
+}
+/** Whether `a` is a later version than `b`, by its numbers: 0.10.0 is later than 0.9.2. */
+function laterVersion(a, b) {
+	const [x, y] = [a ?? "", b].map((v) => v.split(".").map((n) => parseInt(n, 10) || 0));
+	for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+	return false;
+}
 // server/feedback.ts
 function byVersion(fb, latest) {
 	const out = {};
@@ -54,9 +179,13 @@ function locked(ad) {
 	const scores = Object.values(c?.scores ?? {});
 	return scores.length > 0 && scores.every((v) => v >= 4) && !c?.defects?.length;
 }
-function setStatus(ads, lastChange, now = Date.now()) {
+/** Every ad has had its three loops or is locked, however recently the set changed. */
+function complete(ads) {
 	const flat = ads.every((a) => a.rounds.every((r) => !r.image.includes("/loop-")));
-	const finished = ads.length > 0 && (flat || ads.every((a) => a.rounds.length + (a.rejected ?? 0) >= LOOPS || locked(a)));
+	return ads.length > 0 && (flat || ads.every((a) => a.rounds.length + (a.rejected ?? 0) >= LOOPS || locked(a)));
+}
+function setStatus(ads, lastChange, now = Date.now()) {
+	const finished = complete(ads);
 	if (now - lastChange < 12e5) return "working";
 	return finished ? "done" : "unfinished";
 }
@@ -184,6 +313,7 @@ async function scanSet(outDir, run, company) {
 			maxRound: Math.max(0, ...ads.flatMap((a) => a.rounds.map((r) => r.n))),
 			critic: criticSummary(ads),
 			status: setStatus(ads, lastChange),
+			complete: complete(ads),
 			...names.has("notes.md") && { notes: `${rel}/notes.md` },
 			...(title || campaign(run)) && { label: title || campaign(run) },
 			feedback: {
@@ -336,6 +466,15 @@ async function thumbnail(file, size, cacheDir) {
 const SELF = fileURLToPath(import.meta.url);
 const APP = join(dirname(SELF), "..", "app");
 const IDLE_MS = 36e5;
+const ROOT = join(dirname(SELF), "..", "..", "..");
+const VERSION = (() => {
+	try {
+		return JSON.parse(readFileSync(join(ROOT, ".claude-plugin", "plugin.json"), "utf8")).version;
+	} catch {
+		return "0.0.0";
+	}
+})();
+const DAY = 864e5;
 const TYPES = {
 	html: "text/html; charset=utf-8",
 	js: "text/javascript",
@@ -401,6 +540,32 @@ async function body(req) {
 	}
 	return JSON.parse(raw || "{}");
 }
+/** Sends the report when one is due: statistics on, the notice answered, and a day since the last one that arrived.
+* A failure is silent and changes nothing, so the page works the same offline. */
+async function sendReport() {
+	const s = readSettings(), r = report(VERSION);
+	if (!r || s.lastReport && Date.now() - Date.parse(s.lastReport) < DAY) return;
+	try {
+		if ((await fetch(`${API}/report`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: reportBytes(r),
+			signal: AbortSignal.timeout(1e4)
+		})).ok) saveSettings((x) => {
+			x.lastReport = (/* @__PURE__ */ new Date()).toISOString();
+		});
+	} catch {}
+}
+/** Asks which version is the latest. The request carries this version and nothing else, with statistics on or off. */
+async function checkVersion() {
+	try {
+		const res = await fetch(`${API}/version?current=${encodeURIComponent(VERSION)}`, { signal: AbortSignal.timeout(1e4) });
+		const latest = res.ok ? (await res.json()).latest : void 0;
+		if (typeof latest === "string" && /^\d+\.\d+\.\d+$/.test(latest)) saveSettings((x) => {
+			x.latestVersion = latest;
+		});
+	} catch {}
+}
 function serve(runs, first) {
 	const thumbs = join(tmpdir(), "parival-thumbs");
 	const app = /* @__PURE__ */ new Map();
@@ -410,7 +575,6 @@ function serve(runs, first) {
 	})) if (f.isFile()) app.set("/" + relative(APP, join(f.parentPath, f.name)).split("\\").join("/"), readFileSync(join(f.parentPath, f.name)));
 	let port = first;
 	let last = Date.now();
-	const ROOT = join(dirname(SELF), "..", "..", "..");
 	for (const [name, file] of [["/about/licence.txt", "LICENSE"], ["/about/third-party-notices.txt", "THIRD_PARTY_NOTICES.md"]]) try {
 		app.set(name, readFileSync(join(ROOT, file)));
 	} catch {}
@@ -419,6 +583,64 @@ function serve(runs, first) {
 		if (post && req.headers["content-type"] !== "application/json") return send(res, 415, { error: "json only" });
 		if (post && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: "wrong origin" });
 		if (path === "/ping") return send(res, 200, { runs });
+		if (path === "/state") {
+			const s = readSettings();
+			return send(res, 200, {
+				version: VERSION,
+				...laterVersion(s.latestVersion, VERSION) && { latest: s.latestVersion },
+				statistics: s.statistics,
+				noticeShown: !!s.noticeShown,
+				supported: s.support.supported,
+				supportUrl: SUPPORT_URL
+			});
+		}
+		if (path === "/notice" && post) {
+			const { statistics } = await body(req);
+			const s = answerNotice(statistics !== false);
+			sendReport();
+			return send(res, 200, { statistics: s.statistics });
+		}
+		if (path === "/statistics" && post) {
+			const { on } = await body(req);
+			const s = setStatistics(on === true);
+			if (s.statistics) sendReport();
+			return send(res, 200, { statistics: s.statistics });
+		}
+		if (path === "/report") {
+			const s = readSettings(), r = report(VERSION);
+			res.writeHead(200, {
+				"Content-Type": "text/plain; charset=utf-8",
+				"Cache-Control": "no-store"
+			});
+			res.end(r ? reportBytes(r) + "\n" : s.statistics ? "Parival sends no report until you have answered the notice about statistics.\n" : "Statistics are off. Parival sends no report.\n");
+			return;
+		}
+		if (path === "/opened" && post) {
+			const { set } = await body(req);
+			const sets = (await scanOut(runs)).flatMap((p) => p.sets);
+			const found = sets.find((x) => x.id === set);
+			if (!found?.complete) return send(res, 200, { ask: false });
+			const mark = createHash("sha256").update(`${runs}/${found.id}`).digest("hex").slice(0, 16);
+			const before = readSettings();
+			if (before.openedRuns.includes(mark)) return send(res, 200, { ask: false });
+			saveSettings((s) => {
+				s.openedRuns.push(mark);
+			});
+			return send(res, 200, { ask: supportDue(before.support, sets.filter((x) => x.complete).length, Date.now()) });
+		}
+		if (path === "/support" && post) {
+			const { action } = await body(req);
+			if (action === "shown") saveSettings((s) => {
+				s.support.asks++;
+				s.support.lastAt = Date.now();
+			});
+			else if (action === "supported") saveSettings((s) => {
+				s.support.supported = true;
+				s.support.lastAt = Date.now();
+			});
+			else return send(res, 400, { error: "unknown action" });
+			return send(res, 200, { ok: true });
+		}
 		if (path === "/list") return send(res, 200, await scanOut(runs));
 		if (path === "/file") {
 			const rel = query.get("path") ?? "";
@@ -486,6 +708,12 @@ function serve(runs, first) {
 		}));
 	});
 	server.listen(port, "127.0.0.1");
+	const outward = () => {
+		checkVersion();
+		sendReport();
+	};
+	outward();
+	setInterval(outward, 216e5).unref();
 	setInterval(() => {
 		if (Date.now() - last > IDLE_MS) {
 			rmSync(statePath(runs), { force: true });

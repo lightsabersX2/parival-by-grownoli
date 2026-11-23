@@ -43,7 +43,7 @@ claude --plugin-dir /path/to/parival-by-grownoli
 
 ## Updates
 
-Each release has a version number, shown in the page's Settings under About. You get a new release when you update the plugin, or automatically when automatic updates are on for the marketplace. They are off until you turn them on.
+Each release has a version number, shown in the page's Settings under About, which also says when a newer version exists. You get a new release when you update the plugin, or automatically when automatic updates are on for the marketplace. They are off until you turn them on.
 
 - **Update now.** Run `/plugin`, open the Installed tab, select the plugin and choose Update now.
 - **Update automatically.** Run `/plugin`, open the Marketplaces tab, select `grownoli` and turn on auto-update. Claude Code then checks for a new release when a session starts.
@@ -62,11 +62,24 @@ For a walk through every part, one step at a time, write: Take the Parival tour.
 
 Runs are saved in `~/Documents/Ads/runs` unless you name another folder. Each run is plain files: HTML, PNG and notes.
 
-## Privacy
+## Statistics and privacy
 
-The local page runs on your computer only, at an address that starts with `127.0.0.1`, and other computers cannot reach it. The page and its server send nothing anywhere and collect no statistics. Your ratings and comments are saved as `feedback.json` beside the run.
+The local page runs on your computer only, at an address that starts with `127.0.0.1`, and other computers cannot reach it. Your ads, ratings and comments stay on your computer.
+
+Parival sends Grownoli two things:
+
+- **Statistics**, while they are on. They are counts: runs, ads and formats made, how the blind comparisons ended, project files made for Grownoli Studio, how long a run takes, errors by kind, and the versions of Parival, Node and your operating system. The counts carry a random ID made on your computer. The ID is not linked to your name, your email or your Claude account. Parival never sends websites, brand names, ad copy, pictures, file names or comments.
+- **A version check**, so that the page can say when a newer version exists. The check carries the plugin's version and nothing else.
+
+The page shows a notice about statistics the first time it opens, and sends no statistics before you have answered it. Turn statistics off there, or later in Settings. Turning them off deletes the ID. Statistics Report in Settings shows the exact data of the next report.
+
+Parival keeps the counts and the switch in `~/.config/parival-by-grownoli`.
 
 Making ads uses Claude Code, which works as your Claude plan describes, and reads the website you name.
+
+## Contributing money
+
+Parival is free. A contribution helps its development and unlocks nothing. Settings has a Contribute button, and the page asks now and then after you have opened a finished run.
 
 ## Before you run an ad
 

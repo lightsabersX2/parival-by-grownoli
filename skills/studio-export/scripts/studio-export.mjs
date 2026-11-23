@@ -6,6 +6,7 @@
 // else is photographed in paint order as transparent pictures.
 // Needs Node 22 or later and Chrome, Chromium, Edge or Brave. CHROME_BIN overrides the search.
 import { fileURLToPath } from 'node:url';
+import { count } from '../../local-page/scripts/counts.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import zlib from 'node:zlib'; import os from 'node:os'; import http from 'node:http'; import { spawn } from 'node:child_process';
 
 const args = process.argv.slice(2), sizeAt = args.indexOf('--size');
@@ -149,7 +150,9 @@ const trim = png => tool.evaluate(`(async () => { const bmp = await createImageB
     lockedLayers: [...(BASE.lockedLayers || []), ...layers.filter(l => l.image && /^custom_img_picture_/.test(l.image.id) && l.image.width * l.image.height > 0.4 * CW * CH).map(l => l.image.id)] };
     const data = { config, generationParams: { aspectRatio: aspect, prompt: '', seed: null, model: 'flash' }, fonts: [...fonts.values()], notes: [...new Set(notes)] };
     fs.writeFileSync(out, zip([['project-data.json', Buffer.from(JSON.stringify(data))], ...fontFiles]));
+    count({ studioExports: 1 });
     console.log(JSON.stringify({ file: path.resolve(out), canvas: aspect, background: ground ?? 'a locked picture layer, or none', textLayers: config.messageShapes.filter(s => s.visible).length, pictureLayers: config.customImages.length, fonts: fonts.size, notes: data.notes }, null, 1));
+  } catch (e) { count({ error: 'export_failed' }); throw e;
   } finally {
     proc.kill('SIGKILL'); srv.close(); setTimeout(() => { fs.rmSync(profile, { recursive: true, force: true }); process.exit(process.exitCode ?? 0); }, 300);
   }

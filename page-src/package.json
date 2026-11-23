@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build && rolldown server/main.ts --file ../skills/local-page/scripts/page.mjs --platform node --format esm",
+    "build": "vue-tsc -b && vite build && rolldown server/main.ts --file ../skills/local-page/scripts/page.mjs --platform node --format esm && rolldown server/counts.ts --file ../skills/local-page/scripts/counts.mjs --platform node --format esm",
     "test": "node --test ../tests/"
   },
   "dependencies": {

@@ -7,12 +7,14 @@ import ContextMenu from './components/ContextMenu.vue'
 import DetailPanel from './components/DetailPanel.vue'
 import FullView from './components/FullView.vue'
 import LoopsView from './components/LoopsView.vue'
+import FirstNotice from './components/FirstNotice.vue'
+import SupportPrompt from './components/SupportPrompt.vue'
 import SetRow from './components/SetRow.vue'
 import SettingsSheet from './components/SettingsSheet.vue'
 import SkeletonRows from './components/SkeletonRows.vue'
 import SidebarTrigger from './components/SidebarTrigger.vue'
 import { onKey, settingsOpen } from './keys'
-import { check, currentProject, lastAction, filter, matches, shownFor, versionFeedback, dateLabel, load, loadFailed, loaded, updates, panel, saveError, showPending, reveal, clientFolders } from './state'
+import { check, loadApp, currentProject, lastAction, filter, matches, shownFor, versionFeedback, dateLabel, load, loadFailed, loaded, updates, panel, saveError, showPending, reveal, clientFolders } from './state'
 
 const project = computed(() => currentProject.value)
 const FILTERS = [['all', 'All'], ['unrated', 'Unrated'], ['liked', 'My Favourites']] as const
@@ -29,6 +31,7 @@ const latest = computed(() => (project.value?.sets[0] ? dateLabel(project.value.
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   void load()
+  void loadApp()
   timer = setInterval(check, 10_000)
   window.addEventListener('focus', check)
   window.addEventListener('keydown', onKey, true)
@@ -80,6 +83,8 @@ watch(lastAction, (a) => { toast.value = a?.text ?? null; clearTimeout(toastTime
     <DetailPanel />
     <FullView />
     <LoopsView />
+    <SupportPrompt />
+    <FirstNotice />
     <ContextMenu />
     <SettingsSheet />
     <p v-if="toast" class="fixed top-4 left-1/2 z-[70] -translate-x-1/2 rounded-md bg-ink px-4 py-2 text-[13px] text-raised shadow-lg" role="status">{{ toast }}</p>

@@ -1,0 +1,151 @@
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir, platform, release } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+// server/counts.ts
+/** Where the report and the version check go. The one place these addresses are written. */
+const API = process.env.PARIVAL_API ?? "https://grownoli.com/api/parival";
+/** Where a contribution goes. The one place this address is written. */
+const SUPPORT_URL = "https://buymeacoffee.com/lightsabersx2";
+/** The errors that are counted, by code. An error's own text is never kept. */
+const ERROR_CODES = [
+	"render_failed",
+	"export_failed",
+	"critique_malformed",
+	"verdict_missing"
+];
+const home = () => process.env.PARIVAL_HOME ?? join(homedir(), ".config", "parival-by-grownoli");
+const read = (name) => {
+	try {
+		return JSON.parse(readFileSync(join(home(), name), "utf8"));
+	} catch {
+		return {};
+	}
+};
+function write(name, data) {
+	mkdirSync(home(), { recursive: true });
+	const tmp = join(home(), `${name}.${process.pid}.tmp`);
+	writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+	renameSync(tmp, join(home(), name));
+}
+const whole = (v) => Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+function readCounts() {
+	const c = read("counts.json");
+	const errors = {};
+	for (const code of ERROR_CODES) if (whole(c.errors?.[code])) errors[code] = whole(c.errors?.[code]);
+	return {
+		runs: whole(c.runs),
+		ads: whole(c.ads),
+		formats: whole(c.formats),
+		loopsKept: whole(c.loopsKept),
+		loopsLost: whole(c.loopsLost),
+		loopsEqual: whole(c.loopsEqual),
+		studioExports: whole(c.studioExports),
+		runMinutes: (Array.isArray(c.runMinutes) ? c.runMinutes : []).map(whole).slice(-200),
+		errors
+	};
+}
+/** Adds to the totals. Counting never stops the work it counts: a folder that cannot be written is ignored. */
+function count(add) {
+	try {
+		const c = readCounts();
+		for (const k of [
+			"runs",
+			"ads",
+			"formats",
+			"loopsKept",
+			"loopsLost",
+			"loopsEqual",
+			"studioExports"
+		]) c[k] += whole(add[k]);
+		if (add.error && ERROR_CODES.includes(add.error)) c.errors[add.error] = (c.errors[add.error] ?? 0) + 1;
+		if (add.runMinutes !== void 0) c.runMinutes = [...c.runMinutes, whole(add.runMinutes)].slice(-200);
+		write("counts.json", c);
+	} catch {}
+}
+function readSettings() {
+	const s = read("settings.json");
+	return {
+		statistics: s.statistics !== false,
+		...typeof s.installId === "string" && { installId: s.installId },
+		...s.noticeShown && { noticeShown: s.noticeShown },
+		...s.lastReport && { lastReport: s.lastReport },
+		...s.latestVersion && { latestVersion: s.latestVersion },
+		support: {
+			asks: whole(s.support?.asks),
+			lastAt: whole(s.support?.lastAt),
+			supported: s.support?.supported === true
+		},
+		openedRuns: Array.isArray(s.openedRuns) ? s.openedRuns.map(String).slice(-500) : []
+	};
+}
+function saveSettings(change) {
+	const s = readSettings();
+	change(s);
+	try {
+		write("settings.json", s);
+	} catch {}
+	return s;
+}
+/** The switch. Off deletes the random ID on this computer; on again makes a new one once the notice has been seen. */
+function setStatistics(on) {
+	return saveSettings((s) => {
+		s.statistics = on;
+		if (!on) delete s.installId;
+		else if (s.noticeShown && !s.installId) s.installId = randomUUID();
+	});
+}
+/** The person answered the first-open notice, with statistics left on or turned off. */
+function answerNotice(statistics, now = /* @__PURE__ */ new Date()) {
+	return saveSettings((s) => {
+		s.noticeShown ??= now.toISOString();
+		s.statistics = statistics;
+		if (!statistics) delete s.installId;
+		else s.installId ??= randomUUID();
+	});
+}
+const median = (xs) => {
+	if (!xs.length) return 0;
+	const s = [...xs].sort((a, b) => a - b);
+	return s.length % 2 ? s[(s.length - 1) / 2] : Math.round((s[s.length / 2 - 1] + s[s.length / 2]) / 2);
+};
+/** The next report, or null when none will be sent: statistics are off, or the notice has not been answered. */
+function report(version) {
+	const s = readSettings();
+	if (!s.statistics || !s.noticeShown || !s.installId) return null;
+	const c = readCounts();
+	return {
+		installId: s.installId,
+		pluginVersion: version,
+		os: `${platform()} ${release()}`,
+		node: Number(process.versions.node.split(".")[0]),
+		runs: c.runs,
+		ads: c.ads,
+		formats: c.formats,
+		loopsKept: c.loopsKept,
+		loopsLost: c.loopsLost,
+		loopsEqual: c.loopsEqual,
+		studioExports: c.studioExports,
+		minutesPerRun: median(c.runMinutes),
+		errors: c.errors
+	};
+}
+/** The exact bytes of a report, as they are sent and as Statistics Report shows them. */
+const reportBytes = (r) => JSON.stringify(r, null, 2);
+const DAY = 864e5;
+const SUPPORT_AFTER_RUNS = 3;
+const SUPPORT_INTERVAL_DAYS = 7;
+const SUPPORTER_INTERVAL_DAYS = 45;
+/** Whether the donation ask is due, with this many finished runs. */
+function supportDue(state, finishedRuns, now) {
+	if (state.supported) return now - state.lastAt >= 45 * DAY;
+	if (state.asks === 0) return finishedRuns >= 3;
+	return now - state.lastAt >= 7 * DAY;
+}
+/** Whether `a` is a later version than `b`, by its numbers: 0.10.0 is later than 0.9.2. */
+function laterVersion(a, b) {
+	const [x, y] = [a ?? "", b].map((v) => v.split(".").map((n) => parseInt(n, 10) || 0));
+	for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+	return false;
+}
+export { API, ERROR_CODES, SUPPORTER_INTERVAL_DAYS, SUPPORT_AFTER_RUNS, SUPPORT_INTERVAL_DAYS, SUPPORT_URL, answerNotice, count, home, laterVersion, readCounts, readSettings, report, reportBytes, saveSettings, setStatistics, supportDue };

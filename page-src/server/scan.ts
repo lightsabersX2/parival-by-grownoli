@@ -3,7 +3,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { criticSummary } from './critic.ts'
-import { setStatus } from './status.ts'
+import { complete, setStatus } from './status.ts'
 import type { Ad, AdSet, AdText, Critique, Feedback, Project } from './types.ts'
 
 // a size, optionally followed by a slot name, so one set can hold many ads of one size: 1x1, 1x1-a01
@@ -101,6 +101,7 @@ async function scanSet(outDir: string, run: string, company: string): Promise<{ 
     maxRound: Math.max(0, ...ads.flatMap((a) => a.rounds.map((r) => r.n))),
     critic: criticSummary(ads),
     status: setStatus(ads, lastChange),
+    complete: complete(ads),
     ...(names.has('notes.md') && { notes: `${rel}/notes.md` }),
     ...((title || campaign(run)) && { label: title || campaign(run) }),
     feedback: { ...feedback, ads: feedback.ads ?? {} },

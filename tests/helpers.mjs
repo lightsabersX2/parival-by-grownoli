@@ -8,6 +8,16 @@ import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+// No test touches the real Parival folder or sends anything to Grownoli: each test file gets its own folder, and the
+// address for reports is a port nothing listens on unless the test sets its own receiver first.
+process.env.PARIVAL_HOME ??= fs.mkdtempSync(path.join(os.tmpdir(), 'parival-home-'))
+process.env.PARIVAL_API ??= 'http://127.0.0.1:9/parival'
+/** A Parival folder where the first-open notice is already answered, with statistics on or off. */
+export function answeredHome(statistics = false, dir = process.env.PARIVAL_HOME) {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ statistics, noticeShown: '2026-11-01T00:00:00.000Z', ...(statistics && { installId: '00000000-0000-4000-8000-000000000000' }) }))
+  return dir
+}
 export const LINES = ['message_clear_3s', 'exact_copy', 'hierarchy', 'legibility_phone', 'text_amount', 'photo_colour', 'overlay_craft', 'place', 'brand_fit', 'ambition', 'desire', 'owner_would_pay']
 
 /** The plugin's skills copied under "<tmp>/My Plugins/parival by grownoli/". */
@@ -15,6 +25,7 @@ export function pluginCopy() {
   const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'parival-test-')), 'My Plugins', 'parival by grownoli')
   fs.cpSync(path.join(ROOT, 'skills'), path.join(dir, 'skills'), { recursive: true })
   for (const f of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f))
+  fs.cpSync(path.join(ROOT, '.claude-plugin'), path.join(dir, '.claude-plugin'), { recursive: true })
   return dir
 }
 
@@ -29,9 +40,14 @@ export function png(w, h, [r, g, b]) {
 export const critique = (score, defects = []) => ({ scores: Object.fromEntries(LINES.map((l) => [l, score])), evidence: Object.fromEntries(LINES.map((l) => [l, 'seen'])), defects, plain_or_template: 'plain' })
 
 /** A runs folder holding one run of two ads in five formats, each with one rendered loop. */
-export function fakeRuns({ loops = 1 } = {}) {
+export function fakeRuns({ loops = 1, count = 1 } = {}) {
   const runs = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'parival-runs-')), 'My Ads', 'runs')
-  const set = path.join(runs, '2026-11-23-spring-sale', 'harbour-bakery')
+  for (let i = 2; i <= count; i++) addRun(runs, `2026-11-${10 + i}-extra-${i}`, loops)
+  return { runs, set: addRun(runs, '2026-11-23-spring-sale', loops) }
+}
+/** One more run for Harbour Bakery in a runs folder; with three loops every format is finished. */
+export function addRun(runs, name, loops = 3) {
+  const set = path.join(runs, name, 'harbour-bakery')
   const sizes = { '1x1': [108, 108], '3x4': [108, 144], '9x16': [108, 192], '16x9': [192, 108], '4x3': [144, 108] }
   const briefs = []
   for (const ad of ['bread', 'coffee']) for (const [size, [w, h]] of Object.entries(sizes)) {
@@ -47,7 +63,7 @@ export function fakeRuns({ loops = 1 } = {}) {
   fs.writeFileSync(path.join(set, '..', 'run.json'), JSON.stringify({ title: 'Vårrea på kajen' }))
   fs.writeFileSync(path.join(set, 'briefs.json'), JSON.stringify(briefs))
   fs.writeFileSync(path.join(set, 'manifest.json'), JSON.stringify(briefs.map((b) => ({ format: b.format, company: b.brand, headline: b.headline }))))
-  return { runs, set }
+  return set
 }
 
 const CHROME = [process.env.CHROME_BIN, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium',

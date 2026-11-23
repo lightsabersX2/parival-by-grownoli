@@ -34,6 +34,8 @@ export interface AdSet {
   critic: { scores: Record<number, number>; best: number | null }
   /** working: changed in the last 20 minutes; done: quiet, and every ad has its three loops; unfinished: quiet without them */
   status: 'done' | 'working' | 'unfinished'
+  /** every ad has had its loops or is locked, whether or not the set changed recently */
+  complete: boolean
   notes?: string
   /** a plain name for the round when the folder name says little, shown after the date */
   label?: string

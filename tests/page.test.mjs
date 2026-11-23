@@ -6,7 +6,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { fakeRuns, pluginCopy } from './helpers.mjs'
+import { answeredHome, fakeRuns, pluginCopy } from './helpers.mjs'
+
+answeredHome()
 
 const PAGE = path.join(pluginCopy(), 'skills', 'local-page', 'scripts', 'page.mjs')
 const page = (...args) => JSON.parse(execFileSync(process.execPath, [PAGE, ...args], { encoding: 'utf8' }))

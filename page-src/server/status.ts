@@ -13,9 +13,14 @@ export function locked(ad: Ad) {
   return scores.length > 0 && scores.every((v) => v >= 4) && !c?.defects?.length
 }
 
-export function setStatus(ads: Ad[], lastChange: number, now = Date.now()): SetStatus {
+/** Every ad has had its three loops or is locked, however recently the set changed. */
+export function complete(ads: Ad[]) {
   const flat = ads.every((a) => a.rounds.every((r) => !r.image.includes('/loop-')))
-  const finished = ads.length > 0 && (flat || ads.every((a) => a.rounds.length + (a.rejected ?? 0) >= LOOPS || locked(a)))
+  return ads.length > 0 && (flat || ads.every((a) => a.rounds.length + (a.rejected ?? 0) >= LOOPS || locked(a)))
+}
+
+export function setStatus(ads: Ad[], lastChange: number, now = Date.now()): SetStatus {
+  const finished = complete(ads)
   // a maker may add a fourth loop after the set critic, so a recent change means the set is still being made
   if (now - lastChange < WORKING_MS) return 'working'
   return finished ? 'done' : 'unfinished'

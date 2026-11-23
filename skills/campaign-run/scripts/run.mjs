@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import { count } from '../../local-page/scripts/counts.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const RENDER = path.join(HERE, '..', '..', 'photo-ads', 'scripts', 'render.mjs')
@@ -41,6 +42,8 @@ if (cmd === 'new') {
   fs.mkdirSync(path.join(set, 'assets'), { recursive: true })
   // the folder name is plain ASCII; the page shows the campaign's name as it was given
   writeJson(path.join(set, '..', 'run.json'), { title: campaign.trim() })
+  fs.mkdirSync(path.join(set, '.staging'), { recursive: true })
+  writeJson(path.join(set, '.staging', 'counted.json'), { started: Date.now(), formats: [] })
   print({ set, assets: path.join(set, 'assets'), formats: ORDER.map((s) => `${s}-<ad>`), sizes: SIZES })
   process.exit(0)
 }
@@ -49,6 +52,10 @@ const set = args[0] && path.resolve(args[0])
 if (!set || !fs.existsSync(set)) fail(`usage: node run.mjs ${cmd ?? '<command>'} <set folder>. Commands: new, render, critique, critique-apply, revise, judge, judge-apply, status.`)
 const STAGING = path.join(set, '.staging')
 const briefs = readJson(path.join(set, 'briefs.json'), [])
+// What this set has already added to the statistics, so a format, an ad and a finished run are each counted once.
+const COUNTED = path.join(STAGING, 'counted.json')
+const counted = () => ({ started: Date.now(), formats: [], ...readJson(COUNTED, {}) })
+const saveCounted = (c) => { fs.mkdirSync(STAGING, { recursive: true }); writeJson(COUNTED, c) }
 const sizeOf = (format) => format.split('-')[0]
 const adOf = (format) => format.split('-').slice(1).join('-') || 'ad'
 const formats = dirs(set).filter((f) => SIZES[sizeOf(f)] && /^\d+x\d+(-[\w-]+)?$/.test(f))
@@ -88,6 +95,10 @@ if (cmd === 'render') {
   }))
   // the page reads each ad's words from manifest.json, so it is rebuilt from the briefs at every render
   writeJson(path.join(set, 'manifest.json'), briefs.map((b) => ({ format: b.format, company: b.brand, headline: b.headline, subheadline: b.subheadline, cta: b.cta, photo_source_url: b.photo_source_url })))
+  const seen = counted(), fresh = Object.keys(out).filter((f) => !seen.formats.includes(f) && fs.existsSync(out[f].png))
+  const newAds = new Set(fresh.map(adOf).filter((ad) => !seen.formats.some((f) => adOf(f) === ad)))
+  if (fresh.length) { count({ formats: fresh.length, ads: newAds.size }); saveCounted({ ...seen, formats: [...seen.formats, ...fresh] }) }
+  for (const r of Object.values(out)) if (r.problems.some((p) => p.startsWith('render failed'))) count({ error: 'render_failed' })
   const missing = formats.filter((f) => !briefs.some((b) => b.format === f))
   print({ rendered: out, ...(missing.length && { no_brief: missing }), faults: Object.values(out).reduce((n, r) => n + r.problems.length, 0) })
 } else if (cmd === 'critique') {
@@ -118,7 +129,7 @@ if (cmd === 'render') {
   const sets = Object.fromEntries(byAd(Object.keys(key)).map(([ad]) => [ad, readJson(path.join(dir, ad, 'set.json'), null)]).filter(([, v]) => v))
   if (Object.keys(sets).length) writeJson(path.join(set, 'set-critique.json'), { ...readJson(path.join(set, 'set-critique.json'), {}), ...sets })
   print({ filed: out, ...(Object.keys(sets).length && { set: sets }), ...(bad.length && { missing_or_malformed: bad, fix: 'Have the same critic correct its file, then run critique-apply again.' }) })
-  if (bad.length) process.exitCode = 1
+  if (bad.length) { process.exitCode = 1; count({ error: 'critique_malformed' }) }
 } else if (cmd === 'revise') {
   // formats named after the set get one more loop whatever they have used: the person asked for a change there
   const named = args.slice(1)
@@ -172,6 +183,7 @@ if (cmd === 'render') {
       fs.mkdirSync(path.join(set, f, 'rejected'), { recursive: true })
       fs.renameSync(loopDir(f, k.revision), path.join(set, f, 'rejected', `loop-${k.revision}`))
     }
+    count(winner === 'revision' ? { loopsKept: 1 } : winner === 'equal' ? { loopsEqual: 1 } : { loopsLost: 1 })
     log.push({ format: f, loop: k.revision, previous: k.previous, winner, reason: v.reason ?? '' })
     out[f] = { winner, kept: `loop-${latest(f)}`, reason: v.reason ?? '' }
   }
@@ -179,7 +191,7 @@ if (cmd === 'render') {
   // the page's Smart Pick shows the version in kept.json, which sits beside the company's folder
   writeJson(path.join(set, '..', 'kept.json'), { ...readJson(path.join(set, '..', 'kept.json'), {}), ...Object.fromEntries(formats.map((f) => [f, `loop-${latest(f)}`])) })
   print({ judged: out, ...(bad.length && { missing: bad, fix: 'Have the same judge write its verdict, then run judge-apply again.' }) })
-  if (bad.length) process.exitCode = 1
+  if (bad.length) { process.exitCode = 1; count({ error: 'verdict_missing' }) }
 } else if (cmd === 'status') {
   const rows = Object.fromEntries(formats.map((f) => [f, {
     kept: kept(f).map((n) => `loop-${n}`), rejected: rejected(f).map((n) => `loop-${n}`), loops_used: used(f), locked: locked(f),
@@ -194,5 +206,7 @@ if (cmd === 'render') {
     : formats.some((f) => !finished(f)) ? 'revise, edit each ad.html, then render'
     : 'nothing: every format has had its three loops or is locked'
   const ads = byAd(formats).map(([ad, list]) => ({ ad, formats: list.map(sizeOf), missing: ORDER.filter((s) => !list.some((f) => sizeOf(f) === s)) }))
-  print({ set, ads, formats: rows, next, done: next.startsWith('nothing') && ads.every((a) => !a.missing.length) })
+  const done = next.startsWith('nothing') && ads.every((a) => !a.missing.length), c = counted()
+  if (done && !c.done) { count({ runs: 1, runMinutes: Math.round((Date.now() - c.started) / 60000) }); saveCounted({ ...c, done: true }) }
+  print({ set, ads, formats: rows, next, done })
 } else fail('Commands: new, render, critique, critique-apply, revise, judge, judge-apply, status.')

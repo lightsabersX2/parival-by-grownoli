@@ -1,6 +1,8 @@
 // The local page's server and its commands, bundled into skills/local-page/scripts/page.mjs. It needs Node 22 and nothing
 // else. It listens on 127.0.0.1 only, answers only requests addressed to this machine's own page, serves the runs
-// folder read-only, and writes one kind of file: feedback.json in a set's folder. It makes no request of its own.
+// folder read-only, and writes one kind of file there: feedback.json in a set's folder. It makes two kinds of request
+// of its own, both to the address in counts.ts: the statistics report, at most once a day and only after the person
+// has answered the notice with statistics left on, and the version check.
 //   node page.mjs start <runs folder> [--port 5290] [--no-open]   starts the page if it is not running, opens it, prints its address
 //   node page.mjs stop <runs folder>                              stops it
 //   node page.mjs comments <runs folder> [--all]                  prints every rating, note and pinned comment the person left
@@ -11,6 +13,8 @@ import { spawn, execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
+import { API, SUPPORT_URL, answerNotice, laterVersion, readSettings, report, reportBytes, saveSettings, setStatistics, supportDue } from './counts.ts'
 import { byVersion } from './feedback.ts'
 import { scanOut } from './scan.ts'
 import { fileInOut, revealPaths, saveFeedback } from './store.ts'
@@ -19,6 +23,9 @@ import { thumbnail } from './thumb.ts'
 const SELF = fileURLToPath(import.meta.url)
 const APP = join(dirname(SELF), '..', 'app')
 const IDLE_MS = 60 * 60_000
+const ROOT = join(dirname(SELF), '..', '..', '..')
+const VERSION: string = (() => { try { return JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version } catch { return '0.0.0' } })()
+const DAY = 24 * 60 * 60_000
 const TYPES: Record<string, string> = { html: 'text/html; charset=utf-8', js: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', woff2: 'font/woff2', woff: 'font/woff', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', md: 'text/plain; charset=utf-8', json: 'application/json', txt: 'text/plain; charset=utf-8' }
 /** Files of a run the page may show: pictures, notes and data. An ad's HTML is never served. */
 const RUN_FILES = new Set(['png', 'jpg', 'jpeg', 'webp', 'md', 'json'])
@@ -46,6 +53,25 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   return JSON.parse(raw || '{}')
 }
 
+/** Sends the report when one is due: statistics on, the notice answered, and a day since the last one that arrived.
+ * A failure is silent and changes nothing, so the page works the same offline. */
+async function sendReport() {
+  const s = readSettings(), r = report(VERSION)
+  if (!r || (s.lastReport && Date.now() - Date.parse(s.lastReport) < DAY)) return
+  try {
+    const res = await fetch(`${API}/report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: reportBytes(r), signal: AbortSignal.timeout(10_000) })
+    if (res.ok) saveSettings((x) => { x.lastReport = new Date().toISOString() })
+  } catch { /* tried again later */ }
+}
+/** Asks which version is the latest. The request carries this version and nothing else, with statistics on or off. */
+async function checkVersion() {
+  try {
+    const res = await fetch(`${API}/version?current=${encodeURIComponent(VERSION)}`, { signal: AbortSignal.timeout(10_000) })
+    const latest = res.ok ? ((await res.json()) as { latest?: unknown }).latest : undefined
+    if (typeof latest === 'string' && /^\d+\.\d+\.\d+$/.test(latest)) saveSettings((x) => { x.latestVersion = latest })
+  } catch { /* tried again later */ }
+}
+
 function serve(runs: string, first: number) {
   const thumbs = join(tmpdir(), 'parival-thumbs')
   // The page's own files are read into memory once. A plugin loaded for one session is unpacked in a temporary folder
@@ -55,7 +81,6 @@ function serve(runs: string, first: number) {
   let port = first
   let last = Date.now()
   // the plugin's licence and notices, read once for the same reason, so About can show them
-  const ROOT = join(dirname(SELF), '..', '..', '..')
   for (const [name, file] of [['/about/licence.txt', 'LICENSE'], ['/about/third-party-notices.txt', 'THIRD_PARTY_NOTICES.md']]) {
     try { app.set(name, readFileSync(join(ROOT, file))) } catch { /* a copy without the file has no such page */ }
   }
@@ -64,6 +89,47 @@ function serve(runs: string, first: number) {
     if (post && req.headers['content-type'] !== 'application/json') return send(res, 415, { error: 'json only' })
     if (post && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'wrong origin' })
     if (path === '/ping') return send(res, 200, { runs })
+    if (path === '/state') {
+      const s = readSettings()
+      return send(res, 200, { version: VERSION, ...(laterVersion(s.latestVersion, VERSION) && { latest: s.latestVersion }), statistics: s.statistics, noticeShown: !!s.noticeShown, supported: s.support.supported, supportUrl: SUPPORT_URL })
+    }
+    if (path === '/notice' && post) {
+      const { statistics } = await body(req)
+      const s = answerNotice(statistics !== false)
+      void sendReport()
+      return send(res, 200, { statistics: s.statistics })
+    }
+    if (path === '/statistics' && post) {
+      const { on } = await body(req)
+      const s = setStatistics(on === true)
+      if (s.statistics) void sendReport()
+      return send(res, 200, { statistics: s.statistics })
+    }
+    if (path === '/report') {
+      // the exact bytes of the next report, or a sentence saying why none is sent
+      const s = readSettings(), r = report(VERSION)
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      return void res.end(r ? reportBytes(r) + '\n' : s.statistics ? 'Parival sends no report until you have answered the notice about statistics.\n' : 'Statistics are off. Parival sends no report.\n')
+    }
+    if (path === '/opened' && post) {
+      // A finished run the person has just opened for the first time is the one moment the donation ask may show.
+      const { set } = await body(req)
+      const sets = (await scanOut(runs)).flatMap((p) => p.sets)
+      const found = sets.find((x) => x.id === set)
+      if (!found?.complete) return send(res, 200, { ask: false })
+      const mark = createHash('sha256').update(`${runs}/${found.id}`).digest('hex').slice(0, 16)
+      const before = readSettings()
+      if (before.openedRuns.includes(mark)) return send(res, 200, { ask: false })
+      saveSettings((s) => { s.openedRuns.push(mark) })
+      return send(res, 200, { ask: supportDue(before.support, sets.filter((x) => x.complete).length, Date.now()) })
+    }
+    if (path === '/support' && post) {
+      const { action } = await body(req)
+      if (action === 'shown') saveSettings((s) => { s.support.asks++; s.support.lastAt = Date.now() })
+      else if (action === 'supported') saveSettings((s) => { s.support.supported = true; s.support.lastAt = Date.now() })
+      else return send(res, 400, { error: 'unknown action' })
+      return send(res, 200, { ok: true })
+    }
     if (path === '/list') return send(res, 200, await scanOut(runs))
     if (path === '/file') {
       const rel = query.get('path') ?? ''
@@ -117,6 +183,9 @@ function serve(runs: string, first: number) {
     writeFileSync(statePath(runs), JSON.stringify({ pid: process.pid, port }))
   })
   server.listen(port, '127.0.0.1')
+  const outward = () => { void checkVersion(); void sendReport() }
+  outward()
+  setInterval(outward, 6 * 60 * 60_000).unref()
   // closes by itself an hour after the last request; an open page asks every ten seconds, so it stays up while in use
   setInterval(() => { if (Date.now() - last > IDLE_MS) { rmSync(statePath(runs), { force: true }); process.exit(0) } }, 60_000).unref()
   for (const s of ['SIGTERM', 'SIGINT'] as const) process.on(s, () => { rmSync(statePath(runs), { force: true }); process.exit(0) })

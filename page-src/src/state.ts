@@ -78,6 +78,38 @@ export async function showPending() {
   if (first) go(first.key)
 }
 
+// ---- what the page's server knows about this install: the version, the statistics switch, the donation ask ----
+export interface AppState { version: string; latest?: string; statistics: boolean; noticeShown: boolean; supported: boolean; supportUrl: string }
+export const app = ref<AppState | null>(null)
+const post = (path: string, body: unknown) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+export async function loadApp() {
+  try { const r = await fetch('/api/state'); if (r.ok) app.value = await r.json() } catch { /* About shows less */ }
+}
+/** The first-open notice was answered, with statistics left on or turned off. */
+export async function answerNotice(statistics: boolean) {
+  if (app.value) app.value = { ...app.value, statistics, noticeShown: true }
+  await post('/api/notice', { statistics }).catch(() => {})
+}
+export async function setStatistics(on: boolean) {
+  if (app.value) app.value = { ...app.value, statistics: on }
+  await post('/api/statistics', { on }).catch(() => {})
+}
+/** The donation ask is due and waits for a quiet moment: no panel, no enlarged ad, no comment being written. */
+export const supportAsk = ref(false)
+const reported = new Set<string>()
+/** The person opened an ad of a finished run. The server says whether that run is new to them and the ask is due. */
+async function openedRun(setId: string) {
+  const set = findSet(setId)
+  if (!set?.complete || reported.has(setId)) return
+  reported.add(setId)
+  try { const r = await post('/api/opened', { set: setId }); if (r.ok && (await r.json()).ask) supportAsk.value = true } catch { /* no ask this time */ }
+}
+/** The ask was shown, or the person said they have already supported. */
+export async function supportAnswer(action: 'shown' | 'supported') {
+  if (action === 'supported' && app.value) app.value = { ...app.value, supported: true }
+  await post('/api/support', { action }).catch(() => {})
+}
+
 // ---- where the page is ----
 export const hash = ref(location.hash)
 window.addEventListener('hashchange', () => (hash.value = location.hash))
@@ -122,9 +154,9 @@ export const zoom = ref<{ set: string; format: string } | null>(null)
 /** The ad whose loops are shown side by side over the page, or null. */
 export const loops = ref<{ set: string; format: string } | null>(null)
 /** One click on an ad: select it, which opens the side panel. */
-export const select = (set: string, format: string) => { panel.value = { set, format }; zoom.value = null }
+export const select = (set: string, format: string) => { panel.value = { set, format }; zoom.value = null; void openedRun(set) }
 /** The magnifying glass: select the ad and show it big. */
-export const enlarge = (set: string, format: string) => { panel.value = { set, format }; zoom.value = { set, format } }
+export const enlarge = (set: string, format: string) => { panel.value = { set, format }; zoom.value = { set, format }; void openedRun(set) }
 /** The ad `by` steps away in the set, wrapping at the ends. */
 export function stepFormat(set: AdSet, format: string, by: number) {
   const n = set.ads.length

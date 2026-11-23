@@ -7,7 +7,9 @@ description: The local page that shows runs of ads, with every loop side by side
 
 The page shows every run in a runs folder: each brand, each run, each ad in its five formats, and every loop of an ad side by side. The person rates versions and writes comments there, and you read them. Paths below are relative to this skill's folder. `<runs>` is the folder that holds the runs, by default `~/Documents/Ads/runs`.
 
-The page runs on this computer only, at an address that starts with `127.0.0.1`. It sends nothing anywhere and needs Node 22 or later and nothing else.
+The page runs on this computer only, at an address that starts with `127.0.0.1`, and needs Node 22 or later and nothing else. The person's ads, ratings and comments stay on this computer. The page's server sends Grownoli two things: counts of what the plugin does, while statistics are on, and a version check.
+
+The first time the page opens it shows a notice about statistics with two buttons. That answer is the person's: tell them the notice is there, and never answer it or change the statistics switch for them.
 
 ## Open it
 
