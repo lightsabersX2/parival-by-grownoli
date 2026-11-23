@@ -1,0 +1,16 @@
+{
+  "name": "grownoli",
+  "owner": {
+    "name": "Grownoli"
+  },
+  "plugins": [
+    {
+      "name": "parival-by-grownoli",
+      "source": "./",
+      "description": "Whole runs of finished ads from a brand's own pictures, a local page to review them, and an export to Grownoli Studio."
+    }
+  ],
+  "metadata": {
+    "description": "Grownoli's plugins for making and finishing ads."
+  }
+}
