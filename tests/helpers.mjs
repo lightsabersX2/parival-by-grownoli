@@ -11,7 +11,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 // No test touches the real Parival folder or sends anything to Grownoli: each test file gets its own folder, and the
 // address for reports is a port nothing listens on unless the test sets its own receiver first.
 process.env.PARIVAL_HOME ??= fs.mkdtempSync(path.join(os.tmpdir(), 'parival-home-'))
-process.env.PARIVAL_API ??= 'http://127.0.0.1:9/parival'
+process.env.PARIVAL_API ??= 'http://127.0.0.1:9'
 /** A Parival folder where the first-open notice is already answered, with statistics on or off. */
 export function answeredHome(statistics = false, dir = process.env.PARIVAL_HOME) {
   fs.mkdirSync(dir, { recursive: true })

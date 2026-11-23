@@ -73,6 +73,8 @@ Parival sends Grownoli two things:
 
 The page shows a notice about statistics the first time it opens, and sends no statistics before you have answered it. Turn statistics off there, or later in Settings. Turning them off deletes the ID. Statistics Report in Settings shows the exact data of the next report.
 
+Grownoli stores no IP address with a report or a version check, and deletes an install's ID 25 months after its last report.
+
 Parival keeps the counts and the switch in `~/.config/parival-by-grownoli`.
 
 Making ads uses Claude Code, which works as your Claude plan describes, and reads the website you name.

@@ -54,19 +54,24 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 /** Sends the report when one is due: statistics on, the notice answered, and a day since the last one that arrived.
- * A failure is silent and changes nothing, so the page works the same offline. */
+ * A failure is silent and changes nothing, so the page works the same offline. A report Grownoli refuses as malformed
+ * is not sent again until its bytes change. */
 async function sendReport() {
   const s = readSettings(), r = report(VERSION)
   if (!r || (s.lastReport && Date.now() - Date.parse(s.lastReport) < DAY)) return
+  const bytes = reportBytes(r), mark = createHash('sha256').update(bytes).digest('hex').slice(0, 16)
+  if (s.refused === mark) return
   try {
-    const res = await fetch(`${API}/report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: reportBytes(r), signal: AbortSignal.timeout(10_000) })
-    if (res.ok) saveSettings((x) => { x.lastReport = new Date().toISOString() })
+    const res = await fetch(`${API}/plugin/statistics`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: bytes, signal: AbortSignal.timeout(10_000) })
+    if (res.status === 200 || res.status === 202) saveSettings((x) => { x.lastReport = new Date().toISOString(); delete x.refused })
+    else if (res.status === 400) saveSettings((x) => { x.refused = mark })
+    // anything else, a rate limit included, is tried again at the next normal time
   } catch { /* tried again later */ }
 }
 /** Asks which version is the latest. The request carries this version and nothing else, with statistics on or off. */
 async function checkVersion() {
   try {
-    const res = await fetch(`${API}/version?current=${encodeURIComponent(VERSION)}`, { signal: AbortSignal.timeout(10_000) })
+    const res = await fetch(`${API}/plugin/version?version=${encodeURIComponent(VERSION)}`, { signal: AbortSignal.timeout(10_000) })
     const latest = res.ok ? ((await res.json()) as { latest?: unknown }).latest : undefined
     if (typeof latest === 'string' && /^\d+\.\d+\.\d+$/.test(latest)) saveSettings((x) => { x.latestVersion = latest })
   } catch { /* tried again later */ }

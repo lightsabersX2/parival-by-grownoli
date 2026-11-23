@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { homedir, platform, release, tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 // server/counts.ts
 /** Where the report and the version check go. The one place these addresses are written. */
-const API = process.env.PARIVAL_API ?? "https://grownoli.com/api/parival";
+const API = process.env.PARIVAL_API ?? "https://api.grownoli.com";
 /** Where a contribution goes. The one place this address is written. */
 const SUPPORT_URL = "https://buymeacoffee.com/lightsabersx2";
 /** The errors that are counted, by code. An error's own text is never kept. */
@@ -57,6 +57,7 @@ function readSettings() {
 		...typeof s.installId === "string" && { installId: s.installId },
 		...s.noticeShown && { noticeShown: s.noticeShown },
 		...s.lastReport && { lastReport: s.lastReport },
+		...typeof s.refused === "string" && { refused: s.refused },
 		...s.latestVersion && { latestVersion: s.latestVersion },
 		support: {
 			asks: whole(s.support?.asks),
@@ -92,10 +93,25 @@ function answerNotice(statistics, now = /* @__PURE__ */ new Date()) {
 	});
 }
 const median = (xs) => {
-	if (!xs.length) return 0;
+	if (!xs.length) return null;
 	const s = [...xs].sort((a, b) => a - b);
 	return s.length % 2 ? s[(s.length - 1) / 2] : Math.round((s[s.length / 2 - 1] + s[s.length / 2]) / 2);
 };
+/** The operating system and its version in the few characters Grownoli accepts, such as "macOS 15.6". */
+let os;
+function osName() {
+	if (os) return os;
+	let name = `${platform()} ${release()}`;
+	if (platform() === "darwin") try {
+		name = `macOS ${execFileSync("sw_vers", ["-productVersion"], {
+			encoding: "utf8",
+			timeout: 3e3
+		}).trim()}`;
+	} catch {}
+	else if (platform() === "win32") name = `Windows ${release()}`;
+	else if (platform() === "linux") name = `Linux ${release()}`;
+	return os = name.replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 40) || "unknown";
+}
 /** The next report, or null when none will be sent: statistics are off, or the notice has not been answered. */
 function report(version) {
 	const s = readSettings();
@@ -104,7 +120,7 @@ function report(version) {
 	return {
 		installId: s.installId,
 		pluginVersion: version,
-		os: `${platform()} ${release()}`,
+		os: osName(),
 		node: Number(process.versions.node.split(".")[0]),
 		runs: c.runs,
 		ads: c.ads,
@@ -541,25 +557,33 @@ async function body(req) {
 	return JSON.parse(raw || "{}");
 }
 /** Sends the report when one is due: statistics on, the notice answered, and a day since the last one that arrived.
-* A failure is silent and changes nothing, so the page works the same offline. */
+* A failure is silent and changes nothing, so the page works the same offline. A report Grownoli refuses as malformed
+* is not sent again until its bytes change. */
 async function sendReport() {
 	const s = readSettings(), r = report(VERSION);
 	if (!r || s.lastReport && Date.now() - Date.parse(s.lastReport) < DAY) return;
+	const bytes = reportBytes(r), mark = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+	if (s.refused === mark) return;
 	try {
-		if ((await fetch(`${API}/report`, {
+		const res = await fetch(`${API}/plugin/statistics`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: reportBytes(r),
+			body: bytes,
 			signal: AbortSignal.timeout(1e4)
-		})).ok) saveSettings((x) => {
+		});
+		if (res.status === 200 || res.status === 202) saveSettings((x) => {
 			x.lastReport = (/* @__PURE__ */ new Date()).toISOString();
+			delete x.refused;
+		});
+		else if (res.status === 400) saveSettings((x) => {
+			x.refused = mark;
 		});
 	} catch {}
 }
 /** Asks which version is the latest. The request carries this version and nothing else, with statistics on or off. */
 async function checkVersion() {
 	try {
-		const res = await fetch(`${API}/version?current=${encodeURIComponent(VERSION)}`, { signal: AbortSignal.timeout(1e4) });
+		const res = await fetch(`${API}/plugin/version?version=${encodeURIComponent(VERSION)}`, { signal: AbortSignal.timeout(1e4) });
 		const latest = res.ok ? (await res.json()).latest : void 0;
 		if (typeof latest === "string" && /^\d+\.\d+\.\d+$/.test(latest)) saveSettings((x) => {
 			x.latestVersion = latest;

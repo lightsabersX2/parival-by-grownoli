@@ -3,13 +3,14 @@
 // the switch, the random ID and when things last happened. No website, brand, word of copy, file name or comment is
 // ever written to either file, so the report cannot hold one. Bundled as skills/local-page/scripts/counts.mjs for the
 // run and export scripts, and into page.mjs for the page's server.
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir, platform, release } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 /** Where the report and the version check go. The one place these addresses are written. */
-export const API = process.env.PARIVAL_API ?? 'https://grownoli.com/api/parival'
+export const API = process.env.PARIVAL_API ?? 'https://api.grownoli.com'
 /** Where a contribution goes. The one place this address is written. */
 export const SUPPORT_URL = 'https://buymeacoffee.com/lightsabersx2'
 
@@ -33,6 +34,8 @@ export interface Settings {
   /** when the person answered the first-open notice; nothing is sent before */
   noticeShown?: string
   lastReport?: string
+  /** a short hash of the last report Grownoli refused as malformed, so the same bytes are not sent again */
+  refused?: string
   latestVersion?: string
   /** the donation ask: how many times shown, when last, and whether the person said they have supported */
   support: { asks: number; lastAt: number; supported: boolean }
@@ -76,7 +79,7 @@ export function readSettings(): Settings {
   return {
     statistics: s.statistics !== false,
     ...(typeof s.installId === 'string' && { installId: s.installId }), ...(s.noticeShown && { noticeShown: s.noticeShown }),
-    ...(s.lastReport && { lastReport: s.lastReport }), ...(s.latestVersion && { latestVersion: s.latestVersion }),
+    ...(s.lastReport && { lastReport: s.lastReport }), ...(typeof s.refused === 'string' && { refused: s.refused }), ...(s.latestVersion && { latestVersion: s.latestVersion }),
     support: { asks: whole(s.support?.asks), lastAt: whole(s.support?.lastAt), supported: s.support?.supported === true },
     openedRuns: Array.isArray(s.openedRuns) ? s.openedRuns.map(String).slice(-500) : [],
   }
@@ -105,19 +108,30 @@ export function answerNotice(statistics: boolean, now = new Date()): Settings {
   })
 }
 
-const median = (xs: number[]) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : Math.round((s[s.length / 2 - 1] + s[s.length / 2]) / 2) }
+const median = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : Math.round((s[s.length / 2 - 1] + s[s.length / 2]) / 2) }
 export interface Report {
   installId: string; pluginVersion: string; os: string; node: number
   runs: number; ads: number; formats: number; loopsKept: number; loopsLost: number; loopsEqual: number
-  studioExports: number; minutesPerRun: number; errors: Partial<Record<ErrorCode, number>>
+  studioExports: number; minutesPerRun: number | null; errors: Partial<Record<ErrorCode, number>>
 }
+/** The operating system and its version in the few characters Grownoli accepts, such as "macOS 15.6". */
+let os: string | undefined
+export function osName() {
+  if (os) return os
+  let name = `${platform()} ${release()}`
+  if (platform() === 'darwin') try { name = `macOS ${execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8', timeout: 3000 }).trim()}` } catch { /* the kernel's version says enough */ }
+  else if (platform() === 'win32') name = `Windows ${release()}`
+  else if (platform() === 'linux') name = `Linux ${release()}`
+  return (os = name.replace(/[^A-Za-z0-9 ._-]/g, '').slice(0, 40) || 'unknown')
+}
+
 /** The next report, or null when none will be sent: statistics are off, or the notice has not been answered. */
 export function report(version: string): Report | null {
   const s = readSettings()
   if (!s.statistics || !s.noticeShown || !s.installId) return null
   const c = readCounts()
   return {
-    installId: s.installId, pluginVersion: version, os: `${platform()} ${release()}`, node: Number(process.versions.node.split('.')[0]),
+    installId: s.installId, pluginVersion: version, os: osName(), node: Number(process.versions.node.split('.')[0]),
     runs: c.runs, ads: c.ads, formats: c.formats, loopsKept: c.loopsKept, loopsLost: c.loopsLost, loopsEqual: c.loopsEqual,
     studioExports: c.studioExports, minutesPerRun: median(c.runMinutes), errors: c.errors,
   }

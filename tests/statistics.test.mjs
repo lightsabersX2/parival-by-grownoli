@@ -10,13 +10,14 @@ import test from 'node:test'
 
 // a receiver standing in for Grownoli: it keeps every request it gets
 const got = []
+let answer = 200 // what the stand-in says to a report
 const receiver = http.createServer((req, res) => {
   let body = ''
   req.on('data', (d) => (body += d))
-  req.on('end', () => { got.push({ method: req.method, url: req.url, headers: req.headers, body }); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(req.url.startsWith('/parival/version') ? '{"latest":"9.9.9"}' : '{}') })
+  req.on('end', () => { got.push({ method: req.method, url: req.url, headers: req.headers, body }); const check = req.url.startsWith('/plugin/version'); res.writeHead(check ? 200 : answer, { 'Content-Type': 'application/json' }); res.end(check ? '{"latest":"9.9.9","updateAvailable":true}' : answer === 400 ? '{"error":"Invalid report"}' : answer === 202 ? '{"ok":true,"skipped":"disabled"}' : '{"ok":true}') })
 })
 await new Promise((r) => receiver.listen(0, '127.0.0.1', r))
-process.env.PARIVAL_API = `http://127.0.0.1:${receiver.address().port}/parival`
+process.env.PARIVAL_API = `http://127.0.0.1:${receiver.address().port}`
 const { addRun, critique, fakeRuns, pluginCopy } = await import('./helpers.mjs')
 const HOME = process.env.PARIVAL_HOME
 const PLUGIN = pluginCopy()
@@ -25,7 +26,7 @@ const page = (...args) => node(['local-page', 'scripts', 'page.mjs'], ...args)
 const run = (...args) => node(['campaign-run', 'scripts', 'run.mjs'], ...args)
 const settings = () => JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8'))
 const setSettings = (change) => { const s = settings(); change(s); fs.writeFileSync(path.join(HOME, 'settings.json'), JSON.stringify(s)) }
-const reports = () => got.filter((g) => g.url === '/parival/report')
+const reports = () => got.filter((g) => g.url === '/plugin/statistics')
 const settle = () => new Promise((r) => setTimeout(r, 400))
 const COMMENT = 'Make the bread larger, Margit said so.'
 
@@ -45,9 +46,10 @@ await post('api/feedback', { set: '2026-11-23-spring-sale/harbour-bakery', forma
 
 test('the version check carries the version and nothing else, before any notice', async () => {
   await settle()
-  const checks = got.filter((g) => g.url.startsWith('/parival/version'))
+  const checks = got.filter((g) => g.url.startsWith('/plugin/version'))
   assert.equal(checks.length, 1)
-  assert.match(checks[0].url, /^\/parival\/version\?current=\d+\.\d+\.\d+$/)
+  assert.match(checks[0].url, /^\/plugin\/version\?version=\d+\.\d+\.\d+$/)
+  assert.ok(!('origin' in checks[0].headers))
   assert.equal(checks[0].body, '')
   assert.ok(!('cookie' in checks[0].headers) && !('referer' in checks[0].headers))
   assert.equal((await (await fetch(address + 'api/state')).json()).latest, '9.9.9', 'About can say that a newer version exists')
@@ -71,6 +73,16 @@ test('the report holds the contract\'s fields and no site, brand, copy, file nam
   assert.equal(r.loopsKept + r.loopsLost + r.loopsEqual, 10, 'the ten judged revisions are counted')
   assert.ok(r.loopsEqual >= 2 && r.loopsKept >= 1 && r.loopsLost >= 1)
   for (const v of Object.values(r.errors)) assert.equal(typeof v, 'number')
+  // the shapes Grownoli's API accepts; one wrong field refuses the whole report
+  assert.equal(reports()[0].headers['content-type'], 'application/json')
+  assert.ok(Buffer.byteLength(sent) < 8000)
+  assert.match(r.pluginVersion, /^\d+\.\d+\.\d+$/)
+  assert.match(r.os, /^[A-Za-z0-9 ._-]{1,40}$/)
+  if (process.platform === 'darwin') assert.match(r.os, /^macOS \d+(\.\d+)*$/)
+  assert.match(String(r.node), /^\d{1,3}$/)
+  for (const k of ['runs', 'ads', 'formats', 'loopsKept', 'loopsLost', 'loopsEqual', 'studioExports']) assert.ok(Number.isInteger(r[k]) && r[k] >= 0, k)
+  assert.equal(r.minutesPerRun, null, 'no run has finished, so there is no median to send')
+  for (const code of Object.keys(r.errors)) assert.match(code, /^[a-z][a-z0-9_]{0,39}$/)
   const user = os.userInfo().username
   for (const secret of ['harbour', 'bakery', 'bread', 'coffee', 'quay', 'spring', 'sale', 'margit', 'larger', 'headline', '.png', '.html', 'loop-', '1x1', 'runs/', 'my ads', user.toLowerCase(), os.hostname().toLowerCase(), 'http'])
     assert.ok(!sent.toLowerCase().includes(secret), `the report holds "${secret}"`)
@@ -100,6 +112,25 @@ test('turning the switch off deletes the ID and stops the sending; on again make
   await settle()
   assert.equal(reports().length, 2)
   assert.notEqual(JSON.parse(reports()[1].body).installId, first)
+})
+
+test('a refused report is not sent again unchanged, and "skipped" counts as sent', async () => {
+  const due = () => setSettings((s) => { delete s.lastReport })
+  const before = reports().length
+  answer = 400; due()
+  await post('api/statistics', { on: true }); await settle()
+  assert.equal(reports().length, before + 1)
+  assert.equal('lastReport' in settings(), false, 'a refused report is not marked as sent')
+  await post('api/statistics', { on: true }); await settle()
+  assert.equal(reports().length, before + 1, 'the same bytes are not sent a second time')
+  // the totals change, so the report changes and is tried again; 202 means received and not kept
+  answer = 202
+  run('status', set)
+  fs.writeFileSync(path.join(HOME, 'counts.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(HOME, 'counts.json'), 'utf8')), studioExports: 4 }))
+  await post('api/statistics', { on: true }); await settle()
+  assert.equal(reports().length, before + 2)
+  assert.ok(settings().lastReport, 'an answer of 202 counts as sent')
+  answer = 200
 })
 
 test('"Turn Off Statistics" on the notice leaves no ID and sends nothing', async () => {
@@ -139,7 +170,7 @@ test('the donation ask: only on a finished run opened for the first time, at thr
 
 test('with nobody listening, the page and the scripts work the same', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'parival-offline-'))
-  const env = { ...process.env, PARIVAL_HOME: home, PARIVAL_API: 'http://127.0.0.1:9/parival' }
+  const env = { ...process.env, PARIVAL_HOME: home, PARIVAL_API: 'http://127.0.0.1:9' }
   // one loop that a critic scored 5 with no defect is locked, so the run is finished
   const other = fakeRuns({ loops: 1 })
   for (const f of fs.readdirSync(other.set).filter((n) => /^\d+x\d+-/.test(n))) fs.writeFileSync(path.join(other.set, f, 'loop-1', 'critique.json'), JSON.stringify(critique(5)))
