@@ -71,9 +71,11 @@ Parival sends Grownoli two things:
 - **Statistics**, while they are on. They are counts: runs, ads and formats made, how the blind comparisons ended, project files made for Grownoli Studio, how long a run takes, errors by kind, and the versions of Parival, Node and your operating system. The counts carry a random ID made on your computer. The ID is not linked to your name, your email or your Claude account. Parival never sends websites, brand names, ad copy, pictures, file names or comments.
 - **A version check**, so that the page can say when a newer version exists. The check carries the plugin's version and nothing else.
 
-The page shows a notice about statistics the first time it opens, and sends no statistics before you have answered it. Turn statistics off there, or later in Settings. Turning them off deletes the ID. Statistics Report in Settings shows the exact data of the next report.
+The page shows a notice about statistics the first time it opens, and sends no statistics before you have answered it. Turn statistics off there, or later in Settings. Turning them off deletes the ID and sets the counts on your computer back to zero, so turning them on again starts a new ID from nothing. Statistics Report in Settings shows the exact data of the next report, with the ID.
 
-Grownoli stores no IP address with a report or a version check, and deletes an install's ID 25 months after its last report.
+No setting turns the version check off, and the page may make that check before you have seen the notice.
+
+Grownoli stores no IP address with a report or a version check, and deletes an install's ID 25 months after its last report. To have your records deleted sooner, send the ID to hello@grownoli.com before you turn statistics off.
 
 Parival keeps the counts and the switch in `~/.config/parival-by-grownoli`.
 

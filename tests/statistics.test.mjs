@@ -111,7 +111,12 @@ test('turning the switch off deletes the ID and stops the sending; on again make
   await post('api/statistics', { on: true })
   await settle()
   assert.equal(reports().length, 2)
-  assert.notEqual(JSON.parse(reports()[1].body).installId, first)
+  const [old, fresh] = reports().map((r) => JSON.parse(r.body))
+  assert.notEqual(fresh.installId, first)
+  // the new ID must not arrive carrying the old ID's totals, or the two could be matched
+  assert.equal(old.loopsKept + old.loopsLost + old.loopsEqual, 10)
+  for (const k of ['runs', 'ads', 'formats', 'loopsKept', 'loopsLost', 'loopsEqual', 'studioExports']) assert.equal(fresh[k], 0, `${k} starts again from zero under the new ID`)
+  assert.deepEqual([fresh.minutesPerRun, fresh.errors], [null, {}])
 })
 
 test('a refused report is not sent again unchanged, and "skipped" counts as sent', async () => {

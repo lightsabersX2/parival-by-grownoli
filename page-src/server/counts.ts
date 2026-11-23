@@ -90,11 +90,14 @@ export function saveSettings(change: (s: Settings) => void): Settings {
   try { write('settings.json', s) } catch { /* kept for this visit only */ }
   return s
 }
-/** The switch. Off deletes the random ID on this computer; on again makes a new one once the notice has been seen. */
+/** The switch. Off deletes the random ID on this computer and sets the totals back to zero, so that a new ID never
+ * arrives carrying the old ID's totals and the two cannot be matched. On again makes a new ID once the notice has been
+ * seen. */
 export function setStatistics(on: boolean): Settings {
+  if (!on && readSettings().installId) try { write('counts.json', { ...readCounts(), runs: 0, ads: 0, formats: 0, loopsKept: 0, loopsLost: 0, loopsEqual: 0, studioExports: 0, runMinutes: [], errors: {} }) } catch { /* the ID still goes */ }
   return saveSettings((s) => {
     s.statistics = on
-    if (!on) delete s.installId
+    if (!on) { delete s.installId; delete s.refused }
     else if (s.noticeShown && !s.installId) s.installId = randomUUID()
   })
 }
